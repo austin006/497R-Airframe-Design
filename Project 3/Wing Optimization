@@ -1,0 +1,103 @@
+using VortexLattice
+using SNOW
+
+# Optimization of a wing geometry
+
+# Aerodynamics with VortexLattice.jl
+function get_inducedDrag(x) # x = [span, chord]
+    # geometry (right half of the wing)
+    xle = [0.0, 0.4]
+    yle = [0.0, 7.5]
+    zle = [0.0, 0.0]
+    chord = [x[2], x[2]]
+    theta = [2.0*pi/180, 2.0*pi/180]
+    phi = [0.0, 0.0]
+    fc = fill((xc) -> 0, 2) # camberline function for each section
+
+    # discretization parameters
+    ns = 12
+    nc = 6
+    spacing_s = Uniform()
+    spacing_c = Uniform()
+
+    # reference parameters
+    Sref = x[1] * x[2]
+    cref = x[2]
+    bref = x[1]
+    rref = [0.50, 0.0, 0.0]
+    Vinf = 1.0
+    ref = Reference(Sref, cref, bref, rref, Vinf)
+    Qinf = 10
+
+    # freestream parameters
+    alpha = 1.0*pi/180
+    beta = 0.0
+    Omega = [0.0; 0.0; 0.0]
+    fs = Freestream(Vinf, alpha, beta, Omega)
+
+    # construct geometry with mirror image
+    grid, surface = wing_to_surface_panels(xle, yle, zle, chord, theta, phi, ns, nc;
+        fc=fc, spacing_s=spacing_s, spacing_c=spacing_c, mirror=true)
+
+    # symmetry is not used in the analysis
+    symmetric = false
+
+    # create vector containing all surfaces
+    surfaces = [surface]
+
+    # perform steady state analysis
+    system = steady_analysis(surfaces, ref, fs; symmetric=symmetric)
+
+    # retrieve near-field forces
+    CF, CM = body_forces(system; frame=Wind())
+
+    # perform far-field analysis
+    CDiff = far_field_drag(system)
+
+    CD, CY, CL = CF
+    Cl, Cm, Cn = CM
+
+    #Stability Derivatives
+    dCF, dCM = stability_derivatives(system)
+
+    # CDa, CYa, CLa = dCF.alpha
+    # Cla, Cma, Cna = dCM.alpha
+    # CDb, CYb, CLb = dCF.beta
+    # Clb, Cmb, Cnb = dCM.beta
+    # CDp, CYp, CLp = dCF.p
+    # Clp, Cmp, Cnp = dCM.p
+    # CDq, CYq, CLq = dCF.q
+    # Clq, Cmq, Cnq = dCM.q
+    # CDr, CYr, CLr = dCF.r
+    # Clr, Cmr, Cnr = dCM.r
+
+    Di = CD * Qinf * Sref
+
+    return Di
+end
+
+function func!(g, x)
+    # Induced drag CDi
+    Di = get_inducedDrag(x)
+    
+    # Constraints: span < ref-span, lift > weight
+    g[1] = x[1]/x[2]
+
+    return Di
+end
+
+x0 = [1.0; 2.0]  # starting point
+lx = [1.5, 0]  # lower bounds on x
+ux = [Inf, 0.8]  # upper bounds on x
+ng = 1  # number of constraints
+lg = [6.0]  # lower bounds on g
+ug = [8.0]  # upper bounds on g
+options = Options(solver=IPOPT())  # choosing IPOPT solver
+# options = Options(derivatives=ForwardAD()) # forward-mode algorithmic differentiation
+
+# println(get_inducedDrag([1.5, 0.4]))
+xopt, fopt, info = minimize(func!, x0, ng, lx, ux, lg, ug, options)
+
+println("xstar = ", xopt)
+println("fstar = ", fopt)
+println("info = ", info)

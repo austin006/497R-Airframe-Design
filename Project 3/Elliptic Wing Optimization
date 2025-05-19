@@ -1,0 +1,127 @@
+using VortexLattice
+using SNOW
+using Plots
+using FLOWMath: akima, Akima, derivative, gradient
+
+# Optimization for an elliptic wing
+
+#fitting wing geometry to a spline
+function splinegeometry(x, p)
+    # Fit a spline to chord values
+    spliney = x[2:end]
+    splinex = collect(range(0, x[1], length(x)-1))
+
+    cspline = Akima(splinex, spliney)
+    spanpt = range(0, x[1], p)
+
+    chord = cspline.(spanpt)
+    xle = (cspline(0.0) .- cspline.(spanpt))./2
+    yle = collect(spanpt)
+
+    return xle, yle, chord
+end
+
+# Aerodynamics with VortexLattice.jl
+function aerodynamics(x)
+
+    points = 50
+    xle, yle, chord = splinegeometry(x, points)
+
+    zle = zeros(points)
+    theta = (2.0*pi/180)*ones(points)
+    phi = zeros(points)
+    fc = fill((xc) -> 0, points) # camberline function for each section
+
+    # discretization parameters
+    ns = points - 1
+    nc = 6
+    spacing_s = Uniform()
+    spacing_c = Uniform()
+
+    # reference parameters
+    cref = (sum(x) - x[1])/(length(x)-1)
+    bref = x[1]*2
+    Sref = cref * bref
+    rref = [0.50, 0.0, 0.0]
+    Vinf = 1.0
+    ref = Reference(Sref, cref, bref, rref, Vinf)
+
+    # freestream parameters
+    alpha = 1.0*pi/180
+    beta = 0.0
+    Omega = [0.0; 0.0; 0.0]
+    fs = Freestream(Vinf, alpha, beta, Omega)
+
+    # construct geometry with mirror image
+    grid, surface = wing_to_surface_panels(xle, yle, zle, chord, theta, phi, ns, nc;
+        fc=fc, spacing_s=spacing_s, spacing_c=spacing_c, mirror=true)
+
+    # symmetry is not used in the analysis
+    symmetric = false
+
+    # create vector containing all surfaces
+    surfaces = [surface]
+
+    # perform steady state analysis
+    system = steady_analysis(surfaces, ref, fs; symmetric=symmetric)
+
+    # retrieve near-field forces
+    CF, CM = body_forces(system; frame=Wind())
+
+    # perform far-field analysis
+    CDiff = far_field_drag(system)
+
+    CD, CY, CL = CF
+    Cl, Cm, Cn = CM
+
+    #Stability Derivatives
+    dCF, dCM = stability_derivatives(system)
+
+    CDa, CYa, CLa = dCF.alpha
+    Cla, Cma, Cna = dCM.alpha
+    CDb, CYb, CLb = dCF.beta
+    Clb, Cmb, Cnb = dCM.beta
+    CDp, CYp, CLp = dCF.p
+    Clp, Cmp, Cnp = dCM.p
+    CDq, CYq, CLq = dCF.q
+    Clq, Cmq, Cnq = dCM.q
+    CDr, CYr, CLr = dCF.r
+    Clr, Cmr, Cnr = dCM.r
+
+    properties = get_surface_properties(system)
+
+    Qinf = (1/2) * (1.204) * (Vinf)^2
+
+    Di = CD * Qinf * Sref
+    L = CL * Qinf * Sref
+
+    return Di, L, CL, bref, Sref, CD, cref
+end
+
+# Objective function
+function func!(g, x) # x = [semi-span, chord1, c2, c3, c4]
+    Di, L, CL, bref, Sref, CD, cref = aerodynamics(x)
+
+    # Constraints: 
+    # Aspect ratio, span/mean chord or b^2 / Sref
+    g[1] = 6.0 #Sref/cref
+    # Lift is constant
+    g[2] = 2.5 - L
+
+    return CD
+end
+
+x0 = [5, 2.0 ,1.8, 1.4, 0] # starting point
+lx = [5, .1, .1, .1, .1] # lower bounds on x
+ux = [5, 2.0, 2.0, 2.0, 2.0]  # upper bounds on x
+ng = 2 # number of constraints
+lg = [6.0, 0.0] # lower bounds on g
+ug = [8.0, 0.0] # upper bounds on g
+options = Options(solver=IPOPT())  # choosing IPOPT solver
+# options = Options(derivatives=ForwardAD()) # forward-mode algorithmic differentiation
+
+xopt, fopt, info = minimize(func!, x0, ng, lx, ux, lg, ug, options)
+
+println("xstar = ", xopt)
+println("fstar = ", fopt)
+println("info = ", info)

@@ -1,0 +1,38 @@
+# This is my first Julia file
+# FLOW Lab LTRAD Program
+# Author: Austin McGlashan
+# Date: October 4, 2023
+
+
+println("hello world")
+println(1 + 1)
+println(div(5, 2))
+println(5/2)
+println("yay!! my first few lines of code in Julia")
+println()
+
+# Meeting notes from 10/6/2023
+# loopsnstuff()
+
+x = 5
+
+function loopsnstuff(in1, in2=10; kin3="kwarg")
+    letmego = 1
+    while kin3 == "kwarg"
+        y = 99
+        for v in in1:in2
+            y = v + 2
+            println(v)
+        end
+        println("y= ", y)
+        letmego += 1
+
+        if letmego >= 3
+            kin3 = "moses"
+        end
+    end
+
+    return letmego
+end
+
+loopsnstuff(5)
